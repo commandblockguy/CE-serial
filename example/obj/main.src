@@ -1,0 +1,228 @@
+; Zilog eZ80 ANSI C Compiler Release 3.4
+; -optsize -noreduceopt -nomodsect -peephole -globalopt
+; -localcse -const=ROM 
+	FILE	"..\SRC\MAIN.C"
+	.assume ADL=1
+	SEGMENT STRSECT
+L__0:
+	DB	"abcd"
+	DB	0
+	SEGMENT DATA
+_data:
+	DW24	L__0
+;    1	#include <stdbool.h>
+;    2	#include <stddef.h>
+;    3	#include <stdint.h>
+;    4	#include <tice.h>
+;    5	#include <math.h>
+;    6	#include <stdio.h>
+;    7	#include <stdlib.h>
+;    8	#include <string.h>
+;    9	
+;   10	#include <keypadc.h>
+;   11	
+;   12	#include "usbserial.h"
+;   13	
+;   14	void testRead(void* buf, uint24_t size);
+;   15	
+;   16	char *data = "abcd";
+	SEGMENT CODE
+;   17	
+;   18	void main(void) {
+_main:
+	LD	HL,-71
+	CALL	__frameset
+;   19		lineCoding_t lc = {9600, 0, 0, 8};
+	LEA	DE,IX+-7
+;   20		char byte = 0;
+;   21		char str[10];
+;   22		char abuf[64];
+;   23		int size;
+;   24		int i;
+;   25	
+;   26		os_ClrHome();
+	LD	BC,_asm_ClrLCD
+	PUSH	BC
+	LD	HL,_0temp0
+	LD	BC,7
+	LDIR	
+	CALL	__OS
+	POP	BC
+	LD	BC,_asm_HomeUp
+	PUSH	BC
+	CALL	__OS
+	POP	BC
+	LD	BC,_asm_DrawStatusBar
+	PUSH	BC
+	CALL	__OS
+	POP	BC
+;   27		usb_PrePower(3000);
+	LD	BC,3000
+	PUSH	BC
+	CALL	_usb_PrePower
+	POP	BC
+;   28		if(!srl_InitDevice()) goto err;
+	CALL	_srl_InitDevice
+	OR	A,A
+	JR	Z,L_4
+;   29		os_PutStrFull("device inited");
+	LD	BC,L__2
+	PUSH	BC
+	CALL	_os_PutStrFull
+	POP	BC
+;   30		os_NewLine();
+	CALL	_os_NewLine
+;   31		srl_ConfigSerial(&lc);
+	PEA	IX+-7
+	CALL	_srl_ConfigSerial
+	POP	BC
+;   32		srl_SetControlLineState(3);
+	LD	BC,3
+	PUSH	BC
+	CALL	_srl_SetControlLineState
+	POP	BC
+;   33		os_PutStrFull("config set");
+	LD	BC,L__3
+	PUSH	BC
+	CALL	_os_PutStrFull
+	POP	BC
+;   34		os_NewLine();
+	CALL	_os_NewLine
+;   35		do {
+L_10:
+;   36			if(kb_Data[1] & kb_2nd) {
+	LD	A,(16056338)
+	AND	A,32
+	JR	Z,L_9
+;   37				int size = 7;
+;   38				testRead(abuf, size);
+	LD	BC,7
+	PUSH	BC
+	PEA	IX+-71
+	CALL	_testRead
+	POP	BC
+	POP	BC
+;   39				//sprintf(str, "%i: ", recd);
+;   40				//os_PutStrFull(str);
+;   41				//for(i = 0; i < size; i++) {
+;   42				//	sprintf(str, "%2X", abuf[i]);
+;   43				//	os_PutStrFull(str);
+;   44				//}
+;   45				//os_NewLine();
+;   46				delay(100);
+	LD	BC,100
+	PUSH	BC
+	CALL	_delay
+	POP	BC
+;   47			}
+L_9:
+;   48			if(kb_Data[1] & kb_Yequ) {
+	LD	A,(16056338)
+	AND	A,16
+	JR	Z,L_11
+;   49				srl_Write(data, 4);
+	LD	BC,4
+	PUSH	BC
+	LD	BC,(_data)
+	PUSH	BC
+	CALL	_srl_Write
+	POP	BC
+	POP	BC
+;   50				os_PutStrFull("data written");
+	LD	BC,L__6
+	PUSH	BC
+	CALL	_os_PutStrFull
+	POP	BC
+;   51				os_NewLine();
+	CALL	_os_NewLine
+;   52				delay(100);
+	LD	BC,100
+	PUSH	BC
+	CALL	_delay
+	POP	BC
+;   53			}
+;   54	
+;   55		} while(!(kb_Data[6] & kb_Clear));
+L_11:
+	LD	A,(16056348)
+	AND	A,64
+	JR	Z,L_10
+L_4:
+;   56		err:
+;   57		os_PutStrFull("cleaning up");
+	LD	BC,L__8
+	PUSH	BC
+	CALL	_os_PutStrFull
+	POP	BC
+;   58		usb_Cleanup();
+	CALL	_usb_Cleanup
+;   59		//while(!os_GetCSC());
+;   60	}
+	LD	SP,IX
+	POP	IX
+	RET	
+
+
+;**************************** _main ***************************
+;Name                         Addr/Register   Size   Type
+;_usb_Cleanup                        IMPORT  -----   function
+;_data                               STATIC      3   variable
+;_srl_Write                          IMPORT  -----   function
+;_delay                              IMPORT  -----   function
+;_testRead                           IMPORT  -----   function
+;_srl_SetControlLineState            IMPORT  -----   function
+;_srl_ConfigSerial                   IMPORT  -----   function
+;_os_NewLine                         IMPORT  -----   function
+;_os_PutStrFull                      IMPORT  -----   function
+;_srl_InitDevice                     IMPORT  -----   function
+;_usb_PrePower                       IMPORT  -----   function
+;_asm_DrawStatusBar                  IMPORT  -----   function
+;_asm_HomeUp                         IMPORT  -----   function
+;_asm_ClrLCD                         IMPORT  -----   function
+;__OS                                IMPORT  -----   function
+;_0temp0                             STATIC      7   variable
+;abuf                                 IX-71     64   variable
+;lc                                    IX-7      7   variable
+
+
+; Stack Frame Size: 77 (bytes)
+;       Spill Code: 0 (instruction)
+
+
+	SEGMENT STRSECT
+L__2:
+	DB	"device inited"
+	DB	0
+L__3:
+	DB	"config set"
+	DB	0
+L__6:
+	DB	"data written"
+	DB	0
+L__8:
+	DB	"cleaning up"
+	DB	0
+	SEGMENT TEXT
+_0temp0:
+	DL	9600
+	DB	0
+	DB	0
+	DB	8
+	XREF _testRead:ROM
+	XREF _srl_Write:ROM
+	XREF _srl_SetControlLineState:ROM
+	XREF _srl_ConfigSerial:ROM
+	XREF _srl_InitDevice:ROM
+	XREF _usb_Cleanup:ROM
+	XREF _usb_PrePower:ROM
+	XREF _asm_DrawStatusBar:ROM
+	XREF _asm_ClrLCD:ROM
+	XREF _asm_HomeUp:ROM
+	XREF __OS:ROM
+	XREF _os_PutStrFull:ROM
+	XREF _os_NewLine:ROM
+	XREF _delay:ROM
+	XREF __frameset:ROM
+	XDEF _main
+	XDEF _data
+	END

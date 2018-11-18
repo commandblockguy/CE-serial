@@ -24,18 +24,22 @@ enum parityType {
 	parity_space
 };
 
-//usually {9600,0,0,8}
+//usually {9600,0,0,8} for arduinos
+//baud rate is sometimes different
 typedef struct {
-	uint32_t rate;
-	uint8_t charFormat;
+	uint32_t rate; //baud rate
+	uint8_t charFormat; //stop bits
 	uint8_t parityType;
 	uint8_t dataBits;
 } lineCoding_t;
 
 char test(uint8_t arg0);
 
+//Pre-power a USB device so that things have a chance to turn on
+//Probably not required if your device is powered by an external source
 void usb_PrePower(uint24_t time);
 
+//Clean up the USB library to prepare to return to TI-OS
 void usb_Cleanup();
 
 //Initialize a USB device. Call this only once, before srl_ConfigSerial
@@ -44,6 +48,8 @@ uint8_t srl_InitDevice();
 
 //Configure serial transmission. Must call this before sending or recieving data.
 void srl_ConfigSerial(lineCoding_t* lc);
+
+void srl_SetControlLineState(unsigned int bm);
 
 //Get line coding data
 //First byte is inaccurate?

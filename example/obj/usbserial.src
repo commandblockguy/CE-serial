@@ -1,0 +1,342 @@
+; Zilog eZ80 ANSI C Compiler Release 3.4
+; -optsize -noreduceopt -nomodsect -peephole -globalopt
+; -localcse -const=ROM 
+	FILE	"..\SRC\USBSERIAL.C"
+	.assume ADL=1
+	SEGMENT BSS
+_buffer:
+	DS	512
+	SEGMENT DATA
+_bufferStart:
+	DW	0
+	DB	0
+_bufferLen:
+	DW	0
+	DB	0
+;    1	#include <stdbool.h>
+;    2	#include <stddef.h>
+;    3	#include <stdint.h>
+;    4	#include <tice.h>
+;    5	#include <math.h>
+;    6	#include <stdio.h>
+;    7	#include <stdlib.h>
+;    8	#include <string.h>
+;    9	
+;   10	uint24_t receive(void* buf);
+;   11	
+;   12	char buffer[512];
+;   13	uint24_t bufferStart = 0, bufferLen = 0;
+	SEGMENT CODE
+;   14	
+;   15	uint24_t srl_Read(void* out, uint24_t size) {
+_srl_Read:
+	LD	HL,-3
+	CALL	__frameset
+;   16		uint24_t transferred;
+;   17		char str[24];
+;   18		os_PutStrFull("srl_Read");
+	LD	BC,L__0
+	PUSH	BC
+	CALL	_os_PutStrFull
+	POP	BC
+;   19		os_NewLine();
+	CALL	_os_NewLine
+;   20		if(size <= bufferLen) {
+	LD	BC,(IX+9)
+	LD	HL,(_bufferLen)
+	OR	A,A
+	SBC	HL,BC
+	JR	C,L_3
+;   21			os_PutStrFull("lte buflen");
+	LD	BC,L__2
+	PUSH	BC
+	CALL	_os_PutStrFull
+	POP	BC
+;   22			os_NewLine();
+	CALL	_os_NewLine
+;   23			memcpy(out, &buffer[bufferStart], size);
+	LD	BC,(IX+9)
+	PUSH	BC
+	LD	BC,_buffer
+	LD	HL,(_bufferStart)
+	ADD	HL,BC
+	PUSH	HL
+	LD	BC,(IX+6)
+	PUSH	BC
+	CALL	_memcpy
+	POP	BC
+	POP	BC
+	POP	BC
+;   24			bufferStart += size;
+	LD	BC,(IX+9)
+	LD	HL,(_bufferStart)
+	ADD	HL,BC
+	LD	(_bufferStart),HL
+;   25			bufferLen -= size;
+	LD	HL,(_bufferLen)
+	LD	BC,(IX+9)
+	OR	A,A
+	SBC	HL,BC
+	LD	(_bufferLen),HL
+;   26			return size;
+	LD	HL,(IX+9)
+	JR	L_4
+;   27		}
+;   28		else {
+L_3:
+;   29			os_PutStrFull("gt buflen");
+	LD	BC,L__3
+	PUSH	BC
+	CALL	_os_PutStrFull
+	POP	BC
+;   30			os_NewLine();
+	CALL	_os_NewLine
+;   31			memcpy(out, &buffer[bufferStart], bufferLen);
+	LD	BC,(_bufferLen)
+	PUSH	BC
+	LD	BC,_buffer
+	LD	HL,(_bufferStart)
+	ADD	HL,BC
+	PUSH	HL
+	LD	BC,(IX+6)
+	PUSH	BC
+	CALL	_memcpy
+	POP	BC
+	POP	BC
+	POP	BC
+;   32			transferred = bufferLen;
+	LD	BC,(_bufferLen)
+	LD	(IX+-3),BC
+;   33			bufferLen = 0;
+	LD	BC,0
+;   34			bufferStart = 0;
+;   35			bufferLen = receive(buffer);
+	LD	DE,_buffer
+	PUSH	DE
+	LD	(_bufferLen),BC
+	LD	(_bufferStart),BC
+	CALL	_receive
+	POP	BC
+;   36			if(!bufferLen)
+	CALL	__icmpzero
+	LD	(_bufferLen),HL
+	JR	NZ,L_1
+;   37				return transferred;
+	LD	HL,(IX+-3)
+	JR	L_4
+L_1:
+;   38			return transferred + srl_Read(out + transferred, size - transferred);
+	LD	BC,(IX+-3)
+	LD	HL,(IX+9)
+	OR	A,A
+	SBC	HL,BC
+	PUSH	HL
+	LD	BC,(IX+6)
+	PUSH	BC
+	CALL	_srl_Read
+	POP	BC
+	POP	BC
+	LD	BC,(IX+-3)
+	ADD	HL,BC
+;   39		}
+;   40	}
+L_4:
+	LD	SP,IX
+	POP	IX
+	RET	
+
+
+;**************************** _srl_Read ***************************
+;Name                         Addr/Register   Size   Type
+;_receive                            IMPORT  -----   function
+;_bufferStart                        STATIC      3   variable
+;_buffer                             STATIC    512   variable
+;_memcpy                             IMPORT  -----   function
+;_bufferLen                          STATIC      3   variable
+;_os_NewLine                         IMPORT  -----   function
+;_os_PutStrFull                      IMPORT  -----   function
+;transferred                           IX-3      3   variable
+;size                                  IX+9      3   parameter
+;out                                   IX+6      3   parameter
+
+
+; Stack Frame Size: 15 (bytes)
+;       Spill Code: 0 (instruction)
+
+
+	SEGMENT STRSECT
+L__0:
+	DB	"srl_Read"
+	DB	0
+L__2:
+	DB	"lte buflen"
+	DB	0
+L__3:
+	DB	"gt buflen"
+	DB	0
+	SEGMENT CODE
+;   41	
+;   42	bool srl_Available() {
+_srl_Available:
+;   43		os_PutStrFull("srl_Avail");
+	LD	BC,L__6
+	PUSH	BC
+	CALL	_os_PutStrFull
+	POP	BC
+;   44		os_NewLine();
+	CALL	_os_NewLine
+;   45		if(bufferLen) return true;
+	LD	HL,(_bufferLen)
+	CALL	__icmpzero
+	JR	Z,L_6
+	LD	A,1
+	JR	L_7
+L_6:
+;   46		os_PutStrFull("empty buf");
+	LD	BC,L__8
+	PUSH	BC
+	CALL	_os_PutStrFull
+	POP	BC
+;   47		os_NewLine();
+	CALL	_os_NewLine
+;   48		bufferStart = 0;
+;   49		bufferLen = receive(buffer);
+	LD	BC,_buffer
+	PUSH	BC
+	LD	BC,0
+	LD	(_bufferStart),BC
+	CALL	_receive
+	POP	BC
+	LD	(_bufferLen),HL
+;   50		return bufferLen > 0;
+	LD	BC,(_bufferLen)
+	OR	A,A
+	SBC	HL,HL
+	OR	A,A
+	SBC	HL,BC
+	JR	NC,L__10
+	LD	A,1
+	JR	L__11
+L__10:
+	XOR	A,A
+L__11:
+;   51	}
+L_7:
+	RET	
+
+
+;**************************** _srl_Available ***************************
+;Name                         Addr/Register   Size   Type
+;_buffer                             STATIC    512   variable
+;_receive                            IMPORT  -----   function
+;_bufferStart                        STATIC      3   variable
+;_bufferLen                          STATIC      3   variable
+;_os_NewLine                         IMPORT  -----   function
+;_os_PutStrFull                      IMPORT  -----   function
+
+
+; Stack Frame Size: 6 (bytes)
+;       Spill Code: 0 (instruction)
+
+
+	SEGMENT STRSECT
+L__6:
+	DB	"srl_Avail"
+	DB	0
+L__8:
+	DB	"empty buf"
+	DB	0
+	SEGMENT CODE
+;   52	
+;   53	void srl_Await() {
+_srl_Await:
+;   54		os_PutStrFull("srl_Await");
+	LD	BC,L__13
+	PUSH	BC
+	CALL	_os_PutStrFull
+	POP	BC
+;   55		os_NewLine();
+	CALL	_os_NewLine
+;   56		while(!srl_Available());
+L_9:
+	CALL	_srl_Available
+	OR	A,A
+	JR	Z,L_9
+;   57	}
+	RET	
+
+
+;**************************** _srl_Await ***************************
+;Name                         Addr/Register   Size   Type
+;_os_NewLine                         IMPORT  -----   function
+;_os_PutStrFull                      IMPORT  -----   function
+
+
+; Stack Frame Size: 6 (bytes)
+;       Spill Code: 0 (instruction)
+
+
+	SEGMENT STRSECT
+L__13:
+	DB	"srl_Await"
+	DB	0
+	SEGMENT CODE
+;   58	
+;   59	char srl_ReadByte() {
+_srl_ReadByte:
+	LD	HL,-3
+	CALL	__frameset
+;   60		int val;
+;   61		os_PutStrFull("srl_ReadByte");
+	LD	BC,L__16
+	PUSH	BC
+	CALL	_os_PutStrFull
+	POP	BC
+;   62		os_NewLine();
+	CALL	_os_NewLine
+;   63		srl_Await();
+	CALL	_srl_Await
+;   64		srl_Read(&val, 1);
+	LD	BC,1
+	PUSH	BC
+	PEA	IX+-3
+	CALL	_srl_Read
+	POP	BC
+	POP	BC
+;   65		return val;
+	LD	A,(IX+-3)
+;   66	}
+	LD	SP,IX
+	POP	IX
+	RET	
+
+
+;**************************** _srl_ReadByte ***************************
+;Name                         Addr/Register   Size   Type
+;_os_NewLine                         IMPORT  -----   function
+;_os_PutStrFull                      IMPORT  -----   function
+;val                                   IX-3      3   variable
+
+
+; Stack Frame Size: 9 (bytes)
+;       Spill Code: 0 (instruction)
+
+
+	SEGMENT STRSECT
+L__16:
+	DB	"srl_ReadByte"
+	DB	0
+	XREF _receive:ROM
+	XREF _memcpy:ROM
+	XREF _os_PutStrFull:ROM
+	XREF _os_NewLine:ROM
+	XREF __frameset:ROM
+	XREF __icmpzero:ROM
+	XDEF _srl_ReadByte
+	XDEF _srl_Await
+	XDEF _srl_Available
+	XDEF _srl_Read
+	XDEF _bufferLen
+	XDEF _bufferStart
+	XDEF _buffer
+	END

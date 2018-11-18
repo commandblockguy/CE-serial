@@ -203,9 +203,12 @@ usbWaitForConnection:
 ;	db	'Waiting for connection...',0
 ;	call	debugNewLine
 	ld	hl,mpUsbPortSC
-.wait:
+.waitconn:
 	bit	0,(hl)
-	jr	z,.wait
+	jr	z,.waitconn
+	ld	(hl),1 shl 1
+	bit	0,(hl)
+	jr	z,.waitconn
 	call	usbBusReset
 	ld	ix,ep0Desc
 	lea	iy,ix+devRoot-ep0Desc
@@ -235,8 +238,7 @@ usbWaitForConnection:
 ;	call	debugStr
 ;	db	'Transfers added...',0
 ;	call	debugNewLine
-	call	qhWait
-	call	z,debugAbort
+	call	qhRetryMaxOrAbort
 	pop	iy
 	pop	af
 	ld	(ix+qhAddr),a
@@ -304,14 +306,21 @@ usbBusReset:
 ;	call	debugStr
 ;	db	'Resetting bus...',0
 ;	call	debugNewLine
-	ld	hl,mpUsbPortSC+1
+	ld	hl,mpUsbPortSC
+	res	2,(hl)
+.disable:
+	bit	2,(hl)
+	jr	nz,.disable
+	inc	l
 	set	0,(hl)
-	call	_Delay10ms
+	ld	a,5
+	call	_DelayTenTimesAms
 	res	0,(hl)
-.wait:
-	bit	0,(hl)
-	jr	nz,.wait
-	ret
+	dec	l
+.enable:
+	bit	2,(hl)
+	jr	z,.enable
+	jp	_Delay10ms
 
 ; Input:
 ;  ix = hub dev
@@ -395,7 +404,7 @@ devSelectConfig:
 	call	.next
 	pop	ix
 	call	c,debugAbort
-	jp	qhWait
+	jp	qhRetryMaxOrAbort
 .next:
 	or	a,a
 	sbc	hl,hl
@@ -434,13 +443,15 @@ devSelectConfig:
 ; Output:
 ;  hl = desc size
 getConfigDescTotalLength:
+	call	debugHexA
+	call	debugNewLine
 	ld	de,reqGetConfDesc4+wValue
 	ld	(de),a
 	dec	de
 	dec	de;reqGetConfDesc4
 	ld	hl,setupPacket
 	call	controlDefaultTransfer
-	call	qhWait
+	call	qhRetryMaxOrAbort
 	ld	hl,(setupPacket+wTotalLength)
 	inc	hl
 	dec.s	hl
@@ -466,27 +477,27 @@ qhAlloc:
 ;  bc = ?
 ;  de = ?
 ;  hl = ?
-qhWait:
-	ld	hl,(ix+qhFirstQtd)
-.wait:
-;	debugCallStr	'Waiting for transfer '
-;	debugCall	debugHexUHL
-;	debugCallLine	' to complete...'
-	ld	de,(hl) ; FIXME: short packets!!!
-	bit	0,e
-	ret	nz
-	set	bQtdStatus,l
-.status:
-	bit	7,(hl)
-	jr	nz,.status
-	ld	a,(hl)
-	res	bQtdStatus,l
-	call	qtdFree
-	ex	de,hl
-	ld	(ix+qhFirstQtd),hl
-	bit	6,a
-	jr	z,.wait
-	call	debugAbort
+;qhWait:
+;	ld	hl,(ix+qhFirstQtd)
+;.wait:
+;;	debugCallStr	'Waiting for transfer '
+;;	debugCall	debugHexUHL
+;;	debugCallLine	' to complete...'
+;	ld	de,(hl) ; FIXME: short packets!!!
+;	bit	0,e
+;	ret	nz
+;	set	bQtdStatus,l
+;.status:
+;	bit	7,(hl)
+;	jr	nz,.status
+;	ld	a,(hl)
+;	res	bQtdStatus,l
+;	call	qtdFree
+;	ex	de,hl
+;	ld	(ix+qhFirstQtd),hl
+;	bit	6,a
+;	jr	z,.wait
+;	call	debugAbort
 
 ; Input:
 ;  ix = qh
@@ -496,37 +507,148 @@ qhWait:
 ;  bc = ?
 ;  de = ?
 ;  hl = ?
-qhReap:
-	ld	hl,(ix+qhFirstQtd)
-	xor	a,a
-	jr	.wait
-.loop:
-	and	a,(bmQtdStatusHalted or bmQtdStatusBufErr or bmQtdStatusBabble or bmQtdStatusXactErr or bmQtdStatusMissedUframe) shl 1
-	jr	nz,.skip
+;qhReap:
+;	ld	hl,(ix+qhFirstQtd)
+;	xor	a,a
+;	jr	.wait
+;.loop:
+;	and	a,(bmQtdStatusHalted or bmQtdStatusBufErr or bmQtdStatusBabble or bmQtdStatusXactErr or bmQtdStatusMissedUframe) shl 1
+;	jr	nz,.skip
+;	set	bQtdStatus,l
+;.shift:	ld	a,(hl)
+;	rlca
+;	jr	c,.shift
+;	res	bQtdStatus,l
+;.skip:
+;	call	qtdFree
+;	ex	de,hl
+;	ld	(ix+qhFirstQtd),hl
+;.wait:
+;;	debugCallStr	'Waiting for transfer '
+;;	debugCall	debugHexUHL
+;;	debugCallLine	' to complete...'
+;	ld	de,(hl) ; FIXME: short packets!!!
+;	bit	0,e
+;	jr	z,.loop
+;	ld	(ix+qhOverlay+qtdNext),hl ; flush any pending transactions
+;	ld	(ix+qhOverlay+qtdAltNext),hl
+;	ld	(ix+qhOverlay+qtdStatus),0 ; clear pipe halt
+;	ret
+
+; Input:
+;  b = number of tries
+;  ix = qh
+; Output:
+;  a = err code
+;  zf = no error
+;  f = ?
+;  b = ?
+;  de = ?
+;  hl = ?
+qhRetry.retry:
+	ld	(hl),bmQtdStatusActive
+	ld	a,(ix+qhOverlay+qtdPid)
+	or	a,3 shl 2
+	ld	(ix+qhOverlay+qtdPid),a
+	ld	(ix+qhOverlay+qtdStatus),bmQtdStatusActive ; reactivate transfer
+qhRetry.loop:
 	set	bQtdStatus,l
-.shift:	ld	a,(hl)
-	rlca
-	jr	c,.shift
+qhRetry.wait:
+	ld	a,(mpUsbPortSC)
+	rrca
+	and	1
+	jr	nz,qhRetry.error
+	ld	a,(hl)
+	add	a,a
+	jr	c,qhRetry.wait
+	jr	nz,qhRetry.halt
 	res	bQtdStatus,l
-.skip:
+	ld	(ix+qhFirstQtd),de
 	call	qtdFree
-	ex	de,hl
-	ld	(ix+qhFirstQtd),hl
-.wait:
-;	debugCallStr	'Waiting for transfer '
-;	debugCall	debugHexUHL
-;	debugCallLine	' to complete...'
-	ld	de,(hl) ; FIXME: short packets!!!
+qhRetry:
+	ld	hl,(ix+qhFirstQtd)
+	ld	de,(hl)
 	bit	0,e
 	jr	z,.loop
+	xor	a,a
 	ld	bc,(ix+qhOverlay+qtdLen)
 	inc	bc
 	dec.s	bc
 	res	7,b
-	ld	(ix+qhOverlay+qtdNext),hl ; flush any pending transactions
-	ld	(ix+qhOverlay+qtdAltNext),hl
-	ld	(ix+qhOverlay+qtdStatus),0 ; clear pipe halt
 	ret
+.halt:
+	cp	a,bmQtdStatusHalted shl 1
+	jr	z,.error
+	djnz	.retry
+.error:
+	res	bQtdStatus,l
+.reap:
+	call	qtdFree
+	ex	de,hl
+	ld	de,(hl)
+	bit	0,e
+	jr	z,.reap
+	ld	(ix+qhFirstQtd),hl
+	ret
+
+; Input:
+;  b = number of tries
+;  ix = qh
+; Output:
+;  a = err code
+;  zf = no error
+;  f = ?
+;  b = ?
+;  de = ?
+;  hl = ?
+;qhTimeout:
+;
+;	jr	.enter
+;.retry:
+;	ld	(hl),bmQtdStatusActive
+;	ld	a,(ix+qhOverlay+qtdPid
+;	or	a,3 shl 2
+;	ld	(ix+qhOverlay+qtdPid),a
+;	ld	(ix+qhOverlay+qtdStatus),bmQtdStatusActive ; reactivate transfer
+;.loop:
+;	set	bQtdStatus,l
+;.wait:
+;	ld	a,(mpUsbPortSC)
+;	rrca
+;	and	1
+;	jr	nz,.error
+;	ld	a,(hl)
+;	add	a,a
+;	jr	c,.wait
+;	jr	nz,.halt
+;	res	bQtdStatus,l
+;	ld	(ix+qhFirstQtd),de
+;	call	qtdFree
+;.enter:
+;	ld	hl,(ix+qhFirstQtd)
+;	ld	de,(hl)
+;	bit	0,e
+;	jr	z,.loop
+;	xor	a,a
+;	ld	bc,(ix+qhOverlay+qtdLen)
+;	inc	bc
+;	dec.s	bc
+;	res	7,b
+;	ret
+;.halt:
+;	cp	a,bmQtdStatusHalted shl 1
+;	jr	z,.error
+;	djnz	.retry
+;.error:
+;	res	bQtdStatus,l
+;.reap:
+;	call	qtdFree
+;	ex	de,hl
+;	ld	de,(hl)
+;	bit	0,e
+;	jr	z,.reap
+;	ld	(ix+qhFirstQtd),hl
+;	ret
 
 ; Input:
 ;  ix = ep desc
@@ -652,13 +774,15 @@ qtdAlloc:
 ; Input:
 ;  hl = qtd
 ; Output:
-;  bc = ?
+;  f = ?
 qtdFree:
 	bit	0,l
 	call	nz,debugAbort
-	ld	bc,(qtdFreeList)
-	ld	(hl),bc
+	push	de
+	ld	de,(qtdFreeList)
+	ld	(hl),de
 	ld	(qtdFreeList),hl
+	pop	de
 	ret
 
 ; Output:
@@ -738,7 +862,13 @@ getStrDesc:
 	pop	de;setupPacket
 	pop	hl;buf
 	call	controlDefaultTransfer
-	jp	qhWait
+
+qhRetryMaxOrAbort:
+	ld	b,0
+	call	qhRetry
+	ret	z
+	call	debugHexA
+	call	debugAbort
 
 ; Input:
 ;  de = req
@@ -792,7 +922,7 @@ controlTransferAdd:
 	push	bc
 	ld	bc,8
 	ld	a,2
-	call	.ready
+	call	.init
 	pop	bc
 	pop	de
 	pop	hl
@@ -803,10 +933,10 @@ controlTransferAdd:
 	call	nz,bulkTransferAddEnter
 	pop	af
 	rlca
-	and	a,1
-	xor	a,(3 shl 2) or 1
+	sbc	a,a
+	inc	a
 	ld	bc,1 shl 15
-.ready:
+.init:
 	call	qtdInitDummy
 	jr	qtdInit
 
@@ -927,7 +1057,7 @@ bulkTransferAddEnter:
 	db	$fd
 
 ; Input:
-;  a = ioc or cpage or cerr or pid
+;  a = pid
 ;  bc = dt or len
 ;  de = buf
 ;  hl = next qtd
@@ -946,6 +1076,7 @@ qtdInit:
 	ld	(iy+qtdNext),hl
 	pop	hl
 	ld	(iy+qtdAltNext),hl
+	or	a,3 shl 2	; Cerr = 3
 	ld	(iy+qtdPid),a
 	ld	(iy+qtdLen),bc
 	lea	hl,iy+qtdBufPtr

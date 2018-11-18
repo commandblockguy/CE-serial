@@ -4,11 +4,13 @@ segment data
 .def _usb_Cleanup
 .def _srl_InitDevice
 .def _srl_ConfigSerial
+.def _srl_SetControlLineState
 .def _srl_GetLineCoding
 .def _srl_Write
 .def _receive
+.def _testRead
 
-include 'host.inc'
+include 'hostnew.inc'
 include 'debug.inc'
 
 ;group of equates from mateo's msd driver
@@ -283,6 +285,7 @@ mpUsbDmaAddr		:= mpUsbRange + usbDmaAddr
 
 reqTypeSetLnCoding	:= $20
 reqTypeGetLnCoding	:= $21
+reqTypeSetLnCtrl	:= $22
 
 _usb_PrePower:
 	call	usbBusPower
@@ -378,6 +381,7 @@ findCscInterface: ;credit MateoC
 	ld	a,(iy+5)
 	cp	a,10				; bInterfaceClass == 10
 	jr	nz,findCscInterface
+interfaceFound:
 	ld	a,(iy+2)
 	;call	debugStr
 	;db	'interface: ',0
@@ -484,6 +488,23 @@ _srl_ConfigSerial:
 	ld	iy,(device)
 	ld	de,reqLineCoding
 	call	controlDefaultTransfer
+	ld	b,0
+	call	qhRetry
+	pop	ix
+	ret
+
+_srl_SetControlLineState
+	pop	de
+	pop	hl
+	push	hl
+	push	de
+	push	ix
+	ld	iy,(device)
+	ld	de,reqLineControl
+	ld	(reqLineControl+wValue),hl
+	call	controlDefaultTransfer
+	ld	b,0
+	call	qhRetry
 	pop	ix
 	ret
 
@@ -497,8 +518,12 @@ _srl_GetLineCoding:
 	ld	de,reqGetLineCoding
 	push	hl
 	call	controlDefaultTransfer
-	call	qhWait
+	ld	b,0
+	call	qhRetry
 	pop	hl
+	call	debugHexBlockHL
+	db	lineCodingLen
+	call	debugNewLine
 	pop	ix
 	ret
 
@@ -513,7 +538,14 @@ _srl_Write:
 	ld	iy,(device)
 	ld	a,0
 	ep_out := $-1
+	push	de
 	call	bulkTransfer
+	ld	b,0
+	call	qhRetry
+	pop	hl
+	call	debugHexBlockHL
+	db	10
+	call	debugNewLine
 	pop	ix
 	ret
 
@@ -528,11 +560,49 @@ _receive:
 	ep_in := $-1
 	ld	bc,64 ; make more general
 	maxPacketSize := $-3
+	ld	bc,1
+	push	de
 	call	bulkTransfer
-	call	qhReap
+	call	debugStr
+	db	"transfer added",0
+	call	debugNewLine
+	ld	b,0
+	call	qhRetry
+	pop	hl
+	call	debugHexBlockHL
+	db	10
+	call	debugNewLine
 	xor	a,a
 	ld	hl,(maxPacketSize)
+	ld	hl,1
 	sbc	hl,bc
+	call	debugHexHL
+	call	debugNewLine
+	pop	ix
+	ret
+
+_testRead:
+	pop	hl
+	pop	de ; buffer
+	pop	bc ; length
+	push	bc
+	push	de
+	push	hl
+	push	ix
+	ld	iy,(device)
+	ld	a,(ep_in)
+	push	de
+	call	bulkTransfer
+	call	debugStr
+	db	"transfer added",0
+	call	debugNewLine
+	ld	b,0
+	call	qhRetry
+	pop	hl
+	call	debugHexBlockHL
+	db	13
+	call	debugHexBC
+	call	debugNewLine
 	pop	ix
 	ret
 	
@@ -544,13 +614,14 @@ setup:
 	ld	iy,0
 	device := $ - 3
 	call    controlDefaultTransfer
-	jp      qhWait
+	ld	b,0
+	jp      qhRetry
 
 
 reqDevDesc18:
 	db	$80,reqTypeGetDesc,0,descTypeDev,0,0,18,0
 reqConfDesc:
-	db	$80,reqTypeGetDesc,1,descTypeConf,0,0,0,0,0
+	db	$80,reqTypeGetDesc,0,descTypeConf,0,0,0,0,0
 reqGetStrDesc:
 	db	$80,reqTypeGetDesc,0,descTypeStr,0,0,0,1,0
 lineCodingLen	:= 7
@@ -558,5 +629,5 @@ reqLineCoding:
 	db	$21,reqTypeSetLnCoding,0,0,0,0,lineCodingLen,0
 reqGetLineCoding:
 	db	$A1,reqTypeGetLnCoding,0,0,0,0,lineCodingLen,0
-lineCoding:
-	db	$80,$25,0,0,0,0,8
+reqLineControl:
+	db	$21,reqTypeSetLnCtrl,0,0,0,0,0,0

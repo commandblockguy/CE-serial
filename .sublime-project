@@ -1,0 +1,21 @@
+{
+    "folders":
+    [
+        {
+            "path": "example",
+            "follow_symlinks": true
+        }
+    ],
+    "settings":
+    {
+        "tab_size": 4
+    },
+    "build_systems":
+    [
+        {
+            "name": "Make",
+            "shell_cmd": "make",
+            "working_dir": "./example/"
+        }
+    ]
+}
