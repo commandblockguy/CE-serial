@@ -1,14 +1,9 @@
 #include <usbdrvce.h>
 
 // Piss off a Mateo with this ONE SIMPLE TRICK
-// Piss off a Mateo with this ONE SIMPLE TRICK
 #undef NDEBUG
 #define DEBUG
-//#define dbg_sprintf sprintf
-//#define dbgout (dbg_ptr+strlen(dbg_ptr))
 #include <debug.h>
-
-//extern char *dbg_ptr;
 
 #define VERBOSE_EVENTS
 
@@ -21,9 +16,7 @@
 
 #include "serial.h"
 
-extern ti_var_t logFile;
-
-extern uint8_t charX;
+#include "nio_ce.h"
 
 static void putBlockHex(void *block, size_t size) {
     while (size--)
@@ -93,9 +86,11 @@ void printEvent(event, data) {
         "USB_HOST_SYSTEM_ERROR_INT",
         "USB_HOST_ASYNC_ADVANCE_INT",
     };
-    char buf[100];
-    sprintf(buf, "%s:%X\n", usb_event_names[event], (unsigned)data);
-    printText(buf); 
+    if(event <= USB_HOST_ASYNC_ADVANCE_INTERRUPT) {
+        dbg_sprintf(dbgout, "%s:%X\n", usb_event_names[event], (unsigned)data);
+    } else {
+        dbg_sprintf(dbgout, "Unnamed event 0x%X:%X\n", event, (unsigned)data);
+    }
 }
 #else
 #define printEvent(event) dbg_sprintf(dbgout, "%X:%X\n", event, (unsigned)event_data)
@@ -110,7 +105,7 @@ usb_error_t handle_usb_event(usb_event_t event, void *event_data,
             break;
         case USB_DEVICE_DISCONNECTED_EVENT:
             // Let's hope that the compiler realizes that this is the same pointer as callback_data, at least for now
-            memset(&(((srl_Device_t*)callback_data)->info), 0, sizeof(srl_DeviceInfo_t));
+            memset(callback_data, 0, sizeof(srl_device_t));
         case USB_DEVICE_CONNECTED_EVENT:
             printEvent(event, (unsigned)event_data);
             dbg_sprintf(dbgout, "%X", (unsigned)usb_FindDevice(NULL, NULL, USB_SKIP_HUBS));
@@ -122,8 +117,8 @@ usb_error_t handle_usb_event(usb_event_t event, void *event_data,
             printEvent(event, (unsigned)event_data);
             dbg_sprintf(dbgout, "%X", (unsigned)usb_FindDevice(NULL, NULL, USB_SKIP_HUBS));
 
-            if (!((srl_Device_t*)callback_data)->info.device) {
-                ((srl_Device_t*)callback_data)->info.device = event_data;
+            if (!((srl_device_t*)callback_data)->device) {
+                ((srl_device_t*)callback_data)->device = event_data;
             }
             break;
         case USB_DEFAULT_SETUP_EVENT: {
@@ -149,7 +144,7 @@ usb_error_t handle_usb_event(usb_event_t event, void *event_data,
     return USB_SUCCESS;
 }
 
-static bool parseConfigurationDescriptor(srl_Device_t *const sdevice,
+static bool parseConfigurationDescriptor(srl_device_t *const sdevice,
                                          const usb_device_descriptor_t *const device,
                                          usb_configuration_descriptor_t *const configuration,
                                          const size_t length) {
@@ -157,7 +152,7 @@ static bool parseConfigurationDescriptor(srl_Device_t *const sdevice,
     size_t remaining = length;
     usb_error_t error;
     uint8_t in = 0, out = 0;
-    printText("Parsing configuration descriptors...\n");
+    //printText("Parsing configuration descriptors...\n");
     while (remaining && (!in || !out)) {
         usb_descriptor_t *descriptor = (usb_descriptor_t *)current;
         if (remaining < 2 || remaining < descriptor->bLength) return false;
@@ -165,22 +160,22 @@ static bool parseConfigurationDescriptor(srl_Device_t *const sdevice,
             case USB_INTERFACE_DESCRIPTOR: {
                 usb_interface_descriptor_t *interface = (usb_interface_descriptor_t *)descriptor;
                 if (device->idVendor == 0x2341 && device->idProduct == 0x0001) {
-                    //dbg_sprintf(dbgout, "Found a Uno\n");
-                    printText("Found a Uno\n");
-                    sdevice->info.type = CDC;
+                    dbg_sprintf(dbgout, "Found a Uno\n");
+                    //printText("Found a Uno\n");
+                    sdevice->type = SRL_CDC;
                 } else if (device->idVendor == 0x0403 && device->idProduct == 0x6001) {
-                    //dbg_sprintf(dbgout, "Found a FTDI\n");
-                    printText("Found a FTDI\n");
-                    sdevice->info.type = FTDI;
+                    dbg_sprintf(dbgout, "Found a FTDI\n");
+                    //printText("Found a FTDI\n");
+                    sdevice->type = SRL_FTDI;
                 } else {
-                    sdevice->info.type = 0;
+                    sdevice->type = 0;
                 }
                 in = out = 0;
                 break;
             }
             case USB_ENDPOINT_DESCRIPTOR: {
                 usb_endpoint_descriptor_t *endpoint = (usb_endpoint_descriptor_t *)descriptor;
-                if (sdevice->info.type && endpoint->bmAttributes == USB_BULK_TRANSFER) {
+                if (sdevice->type && endpoint->bmAttributes == USB_BULK_TRANSFER) {
                     uint8_t *addr = endpoint->bEndpointAddress & USB_DEVICE_TO_HOST ? &in : &out;
                     if (!*addr) *addr = endpoint->bEndpointAddress;
                 }
@@ -191,55 +186,51 @@ static bool parseConfigurationDescriptor(srl_Device_t *const sdevice,
         remaining -= descriptor->bLength;
     }
     if (!in || !out) return false;
-    if ((error = usb_SetConfiguration(sdevice->info.device, configuration, length)) != USB_SUCCESS) {
+    if ((error = usb_SetConfiguration(sdevice->device, configuration, length)) != USB_SUCCESS) {
         dbg_sprintf(dbgout, "%X\n", error);
         return false;
     }
-    sdevice->info.in = usb_GetDeviceEndpoint(sdevice->info.device, in);
-    sdevice->info.out = usb_GetDeviceEndpoint(sdevice->info.device, out);
+    sdevice->in = usb_GetDeviceEndpoint(sdevice->device, in);
+    sdevice->out = usb_GetDeviceEndpoint(sdevice->device, out);
     return true;
 }
 
-const lineCoding_t srl_default_lc = {115200, 0, 0, 8};
+const srl_lineCoding_t srl_default_lc = {115200, 0, 0, 8};
 
-void srl_StartSerial(srl_Device_t *sdevice, lineCoding_t *lc) {
-    switch (sdevice->info.type) {
+void srl_StartSerial(srl_device_t *sdevice, srl_lineCoding_t *lc) {
+    switch (sdevice->type) {
         default: {
-            //dbg_sprintf(dbgout, "Tried to initialize with non-serial device connected.\n");
-            printText("Tried to initialize with non-serial device connected.\n");
+            dbg_sprintf(dbgout, "Tried to initialize with non-serial device connected.\n");
+            nio_printf("Tried to initialize with non-serial device connected.\n");
             return;
         }
-        case CDC: {
-            const usb_control_setup_t setup = {0x21, 0x20, 0x0000, 0x0000, sizeof(lineCoding_t)};
+        case SRL_CDC: {
+            const usb_control_setup_t setup = {0x21, 0x20, 0x0000, 0x0000, sizeof(srl_lineCoding_t)};
             usb_error_t error = 0;
             size_t length;
 
-            error = usb_DefaultControlTransfer(sdevice->info.device, &setup, lc, 8, &length);
+            error = usb_DefaultControlTransfer(sdevice->device, &setup, lc, 8, &length);
 
             if (error) {
-                char buf[50];
-                //dbg_sprintf(dbgout, "Error %u on ctrl transfer\n", error);
-                sprintf(buf, "Error %u on ctrl transfer\n", error);
-                printText(buf);
+                dbg_sprintf(dbgout, "Error %u on ctrl transfer\n", error);
+                nio_printf("Error %u on ctrl transfer\n", error);
             }
 
             dbg_sprintf(dbgout, "%u bytes\n", length);
             break;
         }
-        case FTDI: {
-            usb_control_setup_t setup = {0x40, 0x3, 0x0000, 0x0000, sizeof(lineCoding_t)};
+        case SRL_FTDI: {
+            usb_control_setup_t setup = {0x40, 0x3, 0x0000, 0x0000, sizeof(srl_lineCoding_t)};
             usb_error_t error = 0;
 
             setup.wValue = 0x001a; // TODO: convert from baud rate to whatever the hell this is
             setup.wIndex = 0x0000;
 
-            error = usb_DefaultControlTransfer(sdevice->info.device, &setup, NULL, 0, NULL);
+            error = usb_DefaultControlTransfer(sdevice->device, &setup, NULL, 0, NULL);
 
             if (error) {
-                char buf[50];
-                //dbg_sprintf(dbgout, "Error %u on ctrl transfer\n", error);
-                sprintf(buf, "Error %u on ctrl transfer\n", error);
-                printText(buf);
+                dbg_sprintf(dbgout, "Error %u on ctrl transfer\n", error);
+                nio_printf("Error %u on ctrl transfer\n", error);
             }
 
             break;
@@ -248,7 +239,7 @@ void srl_StartSerial(srl_Device_t *sdevice, lineCoding_t *lc) {
     
 }
 
-void handleDevice(srl_Device_t *sdevice) {
+void handleDevice(srl_device_t *sdevice) {
     char buf[50];
     usb_error_t error;
     usb_device_descriptor_t device;
@@ -256,20 +247,19 @@ void handleDevice(srl_Device_t *sdevice) {
     uint8_t index;
     bool found = false;
     usb_configuration_descriptor_t *configuration = NULL;
-    if (!sdevice->info.device) return;
-    if (!sdevice->info.configured) {
-        sdevice->info.configured = true;
-        //dbg_sprintf(dbgout, "Device marked as configured.\n");
-        printText("Device marked as configured.\n");
-        if ((error = usb_GetDescriptor(sdevice->info.device, USB_DEVICE_DESCRIPTOR,
+    if (!sdevice->device) return;
+    if (!sdevice->configured) {
+        sdevice->configured = true;
+        dbg_sprintf(dbgout, "Device marked as configured.\n");
+        if ((error = usb_GetDescriptor(sdevice->device, USB_DEVICE_DESCRIPTOR,
                                        0, &device, sizeof(device), &length))
             != USB_SUCCESS) goto err;
         if (length < sizeof(device)) goto noerr;
         putBlockHex(&device, sizeof(device));
         for (index = 0; !found && index != device.bNumConfigurations; ++index) {
-            length = usb_GetConfigurationDescriptorTotalLength(sdevice->info.device, index);
+            length = usb_GetConfigurationDescriptorTotalLength(sdevice->device, index);
             if (!(configuration = malloc(length))) goto noerr;
-            if ((error = usb_GetDescriptor(sdevice->info.device, USB_CONFIGURATION_DESCRIPTOR,
+            if ((error = usb_GetDescriptor(sdevice->device, USB_CONFIGURATION_DESCRIPTOR,
                                            index, configuration, length, &length))
                 != USB_SUCCESS) goto err;
             dbg_sprintf(dbgout, "%u:", index);
@@ -279,37 +269,34 @@ void handleDevice(srl_Device_t *sdevice) {
         }
         if (!found) goto noerr;
 
-        //dbg_sprintf(dbgout, "In: %X | Out: %X\n", usb_GetEndpointAddress(sdevice->info.in), usb_GetEndpointAddress(sdevice->info.out));
-        sprintf(buf, "In: %X | Out: %X\n", usb_GetEndpointAddress(sdevice->info.in), usb_GetEndpointAddress(sdevice->info.out));
-        printText(buf);
-        if (sdevice->info.type) {
+        dbg_sprintf(dbgout, "In: %X | Out: %X\n", usb_GetEndpointAddress(sdevice->in), usb_GetEndpointAddress(sdevice->out));
+        if (sdevice->type) {
             srl_StartSerial(sdevice, &srl_default_lc);
         }
     }
     goto noerr;
  err:
-    //dbg_sprintf(dbgout, "Error in device handling: %X\n", error);
-    sprintf(buf, "Error in device handling: %X\n", error);
-    printText(buf);
+    dbg_sprintf(dbgout, "Error in device handling: %X\n", error);
+    nio_printf("Error in device handling: %X\n", error);
  noerr:
     if (configuration) free(configuration);
-    //memset(sdevice, 0, sizeof(srl_Device_t));
+    //memset(sdevice, 0, sizeof(srl_device_t));
  }
 
-usb_error_t srl_Write(srl_Device_t *sdevice, void *data, size_t size, size_t *actual) {
+usb_error_t srl_Write(srl_device_t *sdevice, void *data, size_t size, size_t *actual) {
     usb_error_t error;
 
-    error = usb_BulkTransfer(sdevice->info.out, data, size, 0, actual);
+    error = usb_BulkTransfer(sdevice->out, data, size, 0, actual);
 
     dbg_sprintf(dbgout, "%X:%u\n", error, *actual);
 
     return error;
 }
 
-usb_error_t srl_Read(srl_Device_t *sdevice, void *buffer, size_t size, size_t *read) {
+usb_error_t srl_Read(srl_device_t *sdevice, void *buffer, size_t size, size_t *read) {
     size_t totalSize;
 
-    //dbg_sprintf(dbgout, "Starting to read %u bytes to buffer %p\n", size, buffer);
+    dbg_sprintf(dbgout, "Starting to read %u bytes to buffer %p\n", size, buffer);
 
     for(totalSize = 0; totalSize < size;) {
         char buf[512];
@@ -318,26 +305,26 @@ usb_error_t srl_Read(srl_Device_t *sdevice, void *buffer, size_t size, size_t *r
 
         size_t actualSize = size - totalSize;
 
-        //dbg_sprintf(dbgout, "%u bytes read so far, reading up to %u now\n", totalSize, actualSize);
+        dbg_sprintf(dbgout, "%u bytes read so far, reading up to %u now\n", totalSize, actualSize);
 
-        error = usb_BulkTransfer(sdevice->info.in, buf, 512, 0, &length);
+        error = usb_BulkTransfer(sdevice->in, buf, 512, 0, &length);
 
-        //dbg_sprintf(dbgout, "Transferred: %u\n", length);
+        dbg_sprintf(dbgout, "Transferred: %u\n", length);
 
         if (error) {
             dbg_sprintf(dbgout, "Error: %X\n", error);
             return error;
         }
 
-        switch (sdevice->info.type) {
-            case CDC: {
+        switch (sdevice->type) {
+            case SRL_CDC: {
                 memcpy(buffer + totalSize, buf, length);
                 totalSize += length;
                 break;
             }
-            case FTDI: {
+            case SRL_FTDI: {
                 uint16_t status = *((uint16_t*)buf);
-                //dbg_sprintf(dbgout, "FTDI input status: %X\n", status);
+                dbg_sprintf(dbgout, "FTDI input status: %X\n", status);
                 memcpy(buffer + totalSize, buf + 2, length - 2);
                 totalSize += length - 2;
                 break;
