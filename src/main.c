@@ -22,11 +22,6 @@
 
 #include "nio_ce.h"
 
-
-char main[1] = {0xC9};
-
-#if 0
-
 void main(void) {
     srl_device_t sdevice = {0};
     usb_error_t error;
@@ -84,7 +79,6 @@ void main(void) {
     gfx_End();
 }
 
-#endif
 #if 0
 void main(void) {
     srl_device_t sdevice;
